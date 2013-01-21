@@ -2,20 +2,24 @@
 
 namespace React\Connection;
 
-use React\SocketClient\ConnectionManager;
+// new Connection\Factory to create both client streams and stream-based servers
 
+// TODO: consider whether it's a good idea to limit this to TCP/IP based client connections?
+// TODO: what about unix-style connections? Possibly better suited for a whole new Connection\FactoryUnix class?
+
+use React\SocketClient\ConnectionManager;
 use React\Socket\Server;
 use React\Dns\Resolver\Resolver;
 use React\EventLoop\LoopInterface;
 use React\Promise\When;
 
-class Factory
+class Factory implements FactoryClientInterface, FactoryServerInterface
 {
     private $loop;
     private $resolver;
     private $factoryClient = null;
 
-    // TODO: consider whether it's okay to call the factory with no resolver in case it's not needed?
+    // TODO: consider whether it's okay to call the factory with no resolver in case it's not needed anyway?
     public function __construct(LoopInterface $loop, Resolver $resolver)
     {
         $this->loop = $loop;
@@ -24,7 +28,7 @@ class Factory
 
     public function createClient($host, $port)
     {
-        return $this->getFactoryClient()->getConnection($host, $port);
+        return $this->getFactoryClient()->createClient($host, $port);
     }
 
     // TODO: argument order seems a bit inconsistent considering createClient() has the argument the other way around...
@@ -41,7 +45,7 @@ class Factory
         }
     }
 
-    public function setFactoryClient($factoryClient)
+    public function setFactoryClient(FactoryClientInterface $factoryClient)
     {
         $this->factoryClient = $factoryClient;
     }
@@ -51,7 +55,7 @@ class Factory
         // no client factory given, use default one
         if ($this->factoryClient === null) {
             // todo: rename ConnectionManager
-            $this->factoryClient = new ConnectionManager($this->loop, $this->resolver);
+            $this->factoryClient = new FactoryClient($this->loop, $this->resolver);
         }
         return $this->factoryClient;
     }
