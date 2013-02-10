@@ -2,6 +2,8 @@
 
 namespace React\HttpClient;
 
+use Guzzle\Common\Exception\UnexpectedValueException;
+
 use React\EventLoop\LoopInterface;
 use React\Dns\Resolver\Resolver;
 use React\Stream\Stream;
@@ -12,27 +14,19 @@ use React\Promise\RejectedPromise;
 class ConnectionManager implements ConnectionManagerInterface
 {
     protected $loop;
-    protected $resolver;
 
-    public function __construct(LoopInterface $loop, Resolver $resolver)
+    public function __construct(LoopInterface $loop)
     {
         $this->loop = $loop;
-        $this->resolver = $resolver;
     }
 
-    public function getConnection($host, $port)
+    public function getConnection($address, $port)
     {
-        $that = $this;
-
-        return $this
-            ->resolveHostname($host)
-            ->then(function ($address) use ($port, $that) {
-                return $that->getConnectionForAddress($address, $port);
-            });
-    }
-
-    public function getConnectionForAddress($address, $port)
-    {
+        if (false === filter_var($address, FILTER_VALIDATE_IP)) {
+            $message = sprintf();
+            return When::reject(new InvalidArgumentException($message));
+        }
+        
         $url = $this->getSocketUrl($address, $port);
 
         $socket = stream_socket_client($url, $errno, $errstr, ini_get("default_socket_timeout"), STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT);
@@ -76,14 +70,4 @@ class ConnectionManager implements ConnectionManagerInterface
     {
         return sprintf('tcp://%s:%s', $host, $port);
     }
-
-    protected function resolveHostname($host)
-    {
-        if (false !== filter_var($host, FILTER_VALIDATE_IP)) {
-            return new FulfilledPromise($host);
-        }
-
-        return $this->resolver->resolve($host);
-    }
 }
-
