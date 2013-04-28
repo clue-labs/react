@@ -13,7 +13,7 @@ class Connector implements ConnectorInterface
     private $loop;
     private $resolver;
 
-    public function __construct(LoopInterface $loop, Resolver $resolver)
+    public function __construct(LoopInterface $loop, Resolver $resolver = null)
     {
         $this->loop = $loop;
         $this->resolver = $resolver;
@@ -97,6 +97,10 @@ class Connector implements ConnectorInterface
     {
         if (false !== filter_var($host, FILTER_VALIDATE_IP)) {
             return When::resolve($host);
+        }
+
+        if ($this->resolver === null) {
+            return When::reject(new ConnectionException('Unable to resolve hostname with no Resolver given'));
         }
 
         return $this->resolver->resolve($host);
