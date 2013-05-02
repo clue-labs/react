@@ -11,21 +11,30 @@ class Factory
     private $loop;
     private $resolver;
     private $connector;
+    private $secureConnector;
 
     public function __construct(LoopInterface $loop, Resolver $resolver = null)
     {
         $this->loop = $loop;
         $this->resolver = $resolver;
         $this->connector = new Connector($loop, $resolver);
+        $this->secureConnector = new SecureConnector($this->connector, $loop);
     }
 
     public function createClient($address)
     {
         $loop = $this->loop;
         $connector = $this->connector;
+        $secureConnector = $this->secureConnector;
 
-        return $this->resolve($address)->then(function ($parts) use ($loop) {
-            return $connector->create($parts['host'], $parts['port']);
+        return $this->resolve($address)->then(function ($parts) use ($loop, $connector, $secureConnector) {
+            if ($parts['scheme'] === 'tcp') {
+                return $connector->create($parts['host'], $parts['port']);
+            } else if ($parts['scheme'] === 'ssl' || $parts['scheme'] === 'tls') {
+                return $secureConnector->create($parts['host'], $parts['port']);
+            } else {
+                throw new InvalidArgumentException('Invalid scheme given');
+            }
         });
     }
 
@@ -46,8 +55,8 @@ class Factory
             throw new InvalidArgumentException('Invalid socket address given');
         }
 
-        if ($parts['scheme'] !== 'tcp') {
-            throw new InvalidArgumentException('Invalid socket scheme given. Only TCP supported');
+        if (!in_array($parts['scheme'], array('tcp', 'ssl', 'tls'))) {
+            throw new InvalidArgumentException('Invalid socket scheme given. Only TCP/SSL/TLS supported');
         }
 
         if (false !== filter_var($parts['host'], FILTER_VALIDATE_IP)) {
