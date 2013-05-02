@@ -12,13 +12,19 @@ class Factory
     private $resolver;
     private $connector;
     private $secureConnector;
-
+    private $context;
     public function __construct(LoopInterface $loop, Resolver $resolver = null)
     {
         $this->loop = $loop;
         $this->resolver = $resolver;
         $this->connector = new Connector($loop, $resolver);
         $this->secureConnector = new SecureConnector($this->connector, $loop);
+
+        $this->context = array('ssl' => array(
+                'capture_peer_cert' => true,
+                'capture_peer_cert_chain' => true,
+            )
+        );
     }
 
     public function createClient($address)
@@ -29,13 +35,51 @@ class Factory
 
         return $this->resolve($address)->then(function ($parts) use ($loop, $connector, $secureConnector) {
             if ($parts['scheme'] === 'tcp') {
-                return $connector->create($parts['host'], $parts['port']);
+                return $this->timeout($connector->create($parts['host'], $parts['port']));
             } else if ($parts['scheme'] === 'ssl' || $parts['scheme'] === 'tls') {
-                return $secureConnector->create($parts['host'], $parts['port']);
+                return $this->timeout($secureConnector->create($parts['host'], $parts['port']));
             } else {
                 throw new InvalidArgumentException('Invalid scheme given');
             }
         });
+    }
+
+    // http://php.net/manual/en/context.socket.php
+
+    // Used to specify the IP address (either IPv4 or IPv6) and/or the port number that PHP will use to access the network. The syntax is ip:port. Setting the IP or the port to 0 will let the system choose the IP and/or port.
+    public function setBind($bindto)
+    {
+        $this->context['socket']['bindto'] = $bindto;
+    }
+
+    // http://php.net/manual/en/context.ssl.php
+
+    // Path to local certificate file on filesystem. It must be a PEM encoded file which contains your certificate and private key. It can optionally contain the certificate chain of issuers.
+    // Passphrase with which your local_cert file was encoded.
+    public function setSslCertificate($path, $passphrase = null)
+    {
+        $this->context['ssl']['cert_local'] = $path;
+        $this->context['ssl']['passphrase'] = $passphrase;
+    }
+
+    // Require verification of SSL certificate used (false)
+    // Allow self-signed certificates. Requires verify_peer (false)
+    public function setSslVerifyPeer($toggle = true, $allowSelfSigned = false)
+    {
+        $this->context['ssl']['verify_peer'] = $path;
+        $this->context['ssl']['allow_self_signed'] = $passphrase;
+    }
+
+    // Location of Certificate Authority file on local filesystem which should be used with the verify_peer context option to authenticate the identity of the remote peer.
+    public function setSslCertificateAutorityFile($cafile)
+    {
+        $this->context['ssl']['cafile'] = $cafile;
+    }
+
+    // If cafile is not specified or if the certificate is not found there, the directory pointed to by capath is searched for a suitable certificate. capath must be a correctly hashed certificate directory.
+    public function setSslCertificateAuthorityPath($capath)
+    {
+        $this->context['ssl']['capath'] = $capath;
     }
 
     protected function resolve($address)
