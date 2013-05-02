@@ -2,6 +2,7 @@
 
 namespace React\SocketClient;
 
+use React\Socket\ConnectionException;
 use React\Dns\Resolver\Resolver;
 use React\EventLoop\LoopInterface;
 use InvalidArgumentException;
@@ -13,6 +14,8 @@ class Factory
     private $connector;
     private $secureConnector;
     private $context;
+    private $timeout;
+
     public function __construct(LoopInterface $loop, Resolver $resolver = null)
     {
         $this->loop = $loop;
@@ -25,6 +28,8 @@ class Factory
                 'capture_peer_cert_chain' => true,
             )
         );
+
+        $this->timeout = ini_get("default_socket_timeout");
     }
 
     public function createClient($address)
@@ -42,6 +47,12 @@ class Factory
                 throw new InvalidArgumentException('Invalid scheme given');
             }
         });
+    }
+
+    // Number of seconds until the connect() system call should timeout.
+    public function setTimeout($timeout)
+    {
+        $this->timeout = $timeout;
     }
 
     // http://php.net/manual/en/context.socket.php
@@ -80,6 +91,34 @@ class Factory
     public function setSslCertificateAuthorityPath($capath)
     {
         $this->context['ssl']['capath'] = $capath;
+    }
+
+    protected function timeout(PromiseInterface $promise)
+    {
+        $deferred = new Deferred();
+        $timedout = false;
+
+        $tid = $this->loop->addTimer($this->timeout, function() use ($deferred, &$timedout) {
+            $deferred->reject(new ConnectionException('Connection attempt timed out'));
+            $timedout = true;
+            // TODO: find a proper way to actually cancel the connection
+            // $promise->cancel()
+        });
+
+        $loop = $this->loop;
+        $promise->then(function ($connection) use ($tid, $loop, &$timedout, $deferred) {
+            if ($timedout) {
+                // connection successfully established but timeout already expired => close successful connection
+                $connection->end();
+            } else {
+                $loop->removeTimeout($tid);
+                $deferred->resolve($connection);
+            }
+        }, function ($error) use ($loop, $tid) {
+            $loop->removeTimeout($tid);
+            throw $error;
+        });
+        return $deferred->promise();
     }
 
     protected function resolve($address)
