@@ -30,9 +30,24 @@ class Executor implements ExecutorInterface
         $request = $this->prepareRequest($query);
 
         $queryData = $this->dumper->toBinary($request);
-        $transport = strlen($queryData) > 512 ? 'tcp' : 'udp';
 
-        return $this->doQuery($nameserver, $transport, $queryData, $query->name);
+        $deferred = new Deferred();
+        $deferred->timer = $this->loop->addTimer($this->timeout, function () use ($name, $deferred) {
+            $timer->getData()->close();
+            $deferred->reject(new TimeoutException(sprintf("DNS query for %s timed out", $name)));
+        });
+
+        $deferred->then(null, function() {
+            $deferred->timer->cancel();
+        });
+
+        if (strlen($queryData) > 512) {
+            $this->doQueryTcp($nameserver, $queryData, $query->name, $deferred);
+        } else {
+            $this->doQueryUdp($nameserver, $queryData, $query->name, $deferred);
+        }
+
+        return $deferred->promise();
     }
 
     public function prepareRequest(Query $query)
@@ -46,50 +61,55 @@ class Executor implements ExecutorInterface
         return $request;
     }
 
-    public function doQuery($nameserver, $transport, $queryData, $name)
+    public function doQueryUdp($nameserver, $queryData, $name, Deferred $result)
     {
         $parser = $this->parser;
-        $loop = $this->loop;
 
-        $response = new Message();
-        $deferred = new Deferred();
+        $this->createConnection($nameserver, 'udp')->then(function ($socket) use ($queryData, $name, $parser, $nameserver, $result) {
+            $socket->send($queryData);
 
-        $retryWithTcp = function () use ($nameserver, $queryData, $name) {
-            return $this->doQuery($nameserver, 'tcp', $queryData, $name);
-        };
+            $socket->once('message', function($data) use ($socket, $parser, $nameserver, $result) {
+                $socket->close();
 
-        $timer = $this->loop->addTimer($this->timeout, function () use (&$conn, $name, $deferred) {
-            $conn->close();
-            $deferred->reject(new TimeoutException(sprintf("DNS query for %s timed out", $name)));
-        });
-
-        $conn = $this->createConnection($nameserver, $transport);
-        $conn->on('data', function ($data) use ($retryWithTcp, $conn, $parser, $response, $transport, $deferred, $timer) {
-            $responseReady = $parser->parseChunk($data, $response);
-
-            if (!$responseReady) {
-                return;
-            }
-
-            $timer->cancel();
-
-            if ($response->header->isTruncated()) {
-                if ('tcp' === $transport) {
-                    $deferred->reject(new BadServerException('The server set the truncated bit although we issued a TCP request'));
-                } else {
-                    $conn->end();
-                    $deferred->resolve($retryWithTcp());
+                $response = new Message();
+                if ($parser->parseChunk($data, $response) === null) {
+                    return $result->reject(new BadServerException('Incomplete chunk via UDP received'));
                 }
 
-                return;
-            }
+                if ($response->header->isTruncated()) {
+                    return $this->doQueryTcp($nameserver, $queryData, $name, $result);
+                }
 
-            $conn->end();
-            $deferred->resolve($response);
+                return $result->resolve($response);
+            });
         });
-        $conn->write($queryData);
+    }
 
-        return $deferred->promise();
+    public function doQueryTcp($nameserver, $queryData, $name, Deferred $result)
+    {
+        $parser = $this->parser;
+
+        $this->createConnection($nameserver, 'tcp')->then(function ($conn) use ($parser, $queryData, $result) {
+            $response = new Message();
+
+            $conn->write($queryData);
+
+            $conn->on('data', function ($data) use ($conn, $parser, $response, $transport, $result, $timer) {
+                $responseReady = $parser->parseChunk($data, $response);
+
+                if (!$responseReady) {
+                    return;
+                }
+
+                $conn->end();
+
+                if ($response->header->isTruncated()) {
+                    return $result->reject(new BadServerException('The server set the truncated bit although we issued a TCP request'));
+                }
+
+                return $result->resolve($response);
+            });
+        });
     }
 
     protected function generateId()
@@ -102,6 +122,6 @@ class Executor implements ExecutorInterface
         $fd = stream_socket_client("$transport://$nameserver");
         $conn = new Connection($fd, $this->loop);
 
-        return $conn;
+        return When::resolve($conn);
     }
 }
