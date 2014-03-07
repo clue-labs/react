@@ -29,6 +29,11 @@ class Factory
         return new Resolver($nameserver, $executor);
     }
 
+    public function createNull()
+    {
+        return new NullResolver();
+    }
+
     protected function createExecutor(LoopInterface $loop)
     {
         return new Executor($loop, new Parser(), new BinaryDumper());
