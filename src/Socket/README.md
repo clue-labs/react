@@ -20,9 +20,9 @@ or in a client context.
 Here is a server that closes the connection if you send it anything.
 
     $loop = React\EventLoop\Factory::create();
-
-    $socket = new React\Socket\Server($loop);
-    $socket->on('connection', function ($conn) {
+    $factory = new React\Socket\Factory($loop);
+    
+    $factory->listenCallback('localhost:1337', function ($conn) {
         $conn->write("Hello there!\n");
         $conn->write("Welcome to this amazing server!\n");
         $conn->write("Here's a tip: don't say anything.\n");
@@ -31,7 +31,6 @@ Here is a server that closes the connection if you send it anything.
             $conn->close();
         });
     });
-    $socket->listen(1337);
 
     $loop->run();
     

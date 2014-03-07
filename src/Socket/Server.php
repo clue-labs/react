@@ -11,24 +11,10 @@ class Server extends EventEmitter implements ServerInterface
     public $master;
     private $loop;
 
-    public function __construct(LoopInterface $loop)
+    public function __construct($master, LoopInterface $loop)
     {
+        $this->master = $master;
         $this->loop = $loop;
-    }
-
-    public function listen($port, $host = '127.0.0.1')
-    {
-        if (strpos($host, ':') !== false) {
-            // enclose IPv6 addresses in square brackets before appending port
-            $host = '[' . $host . ']';
-        }
-
-        $this->master = @stream_socket_server("tcp://$host:$port", $errno, $errstr);
-        if (false === $this->master) {
-            $message = "Could not bind to tcp://$host:$port: $errstr";
-            throw new ConnectionException($message, $errno);
-        }
-        stream_set_blocking($this->master, 0);
 
         $this->loop->addReadStream($this->master, function ($master) {
             $newSocket = stream_socket_accept($master);
